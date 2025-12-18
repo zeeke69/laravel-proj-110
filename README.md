@@ -21,6 +21,16 @@ Laravel is a web application framework with expressive, elegant syntax. We belie
 
 Laravel is accessible, powerful, and provides tools required for large, robust applications.
 
+## Spline 3D background
+
+This app supports a full-screen Spline background (kept behind all UI).
+
+- **How to set it up**: in your `.env`, set:
+  - `VITE_SPLINE_SCENE_URL="PASTE_SPLINE_SCENE_URL_HERE"` (dashboard / authenticated pages)
+  - `VITE_SPLINE_GUEST_SCENE_URL="PASTE_SPLINE_SCENE_URL_HERE"` (login / register)
+
+In Spline, use **Share → Embed** and copy the `<spline-viewer>` `url` value (it ends with `scene.splinecode`).
+
 ## Learning Laravel
 
 Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework. You can also check out [Laravel Learn](https://laravel.com/learn), where you will be guided through building a modern Laravel application.
