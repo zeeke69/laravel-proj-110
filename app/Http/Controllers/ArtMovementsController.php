@@ -63,7 +63,8 @@ class ArtMovementsController extends Controller
         // Cache key based on movement
         $cacheKey = "art_movements_{$movement}";
         
-        $artworks = Cache::remember($cacheKey, 3600, function () use ($selectedMovement) {
+        try {
+            $artworks = Cache::remember($cacheKey, 3600, function () use ($selectedMovement) {
             $artworks = [];
             $targetCount = 20;
             $maxFetches = 100;
@@ -75,78 +76,128 @@ class ArtMovementsController extends Controller
                     break;
                 }
 
-                $response = Http::retry(2, 200)
-                    ->timeout(8)
-                    ->get('https://collectionapi.metmuseum.org/public/collection/v1/objects', [
-                        'departmentIds' => $deptId,
-                        'hasImages' => true,
-                    ]);
-
-                $objectIds = $response->json('objectIDs') ?? [];
-                
-                if (empty($objectIds)) {
-                    continue;
-                }
-
-                shuffle($objectIds);
-
-                foreach ($objectIds as $id) {
-                    if (count($artworks) >= $targetCount || $attempts >= $maxFetches) {
-                        break 2;
-                    }
-                    $attempts++;
-
-                    $artifact = Http::retry(2, 200)
+                try {
+                    $response = Http::retry(2, 200)
                         ->timeout(8)
-                        ->get("https://collectionapi.metmuseum.org/public/collection/v1/objects/{$id}")
-                        ->json();
+                        ->get('https://collectionapi.metmuseum.org/public/collection/v1/objects', [
+                            'departmentIds' => $deptId,
+                            'hasImages' => true,
+                        ]);
 
-                    if (!empty($artifact['primaryImageSmall']) && 
-                        !empty($artifact['title']) &&
-                        !empty($artifact['objectDate'])) {
-                        $artworks[] = $artifact;
+                    if (!$response->successful()) {
+                        continue;
                     }
+
+                    $objectIds = $response->json('objectIDs') ?? [];
+                    
+                    if (empty($objectIds) || !is_array($objectIds)) {
+                        continue;
+                    }
+
+                    shuffle($objectIds);
+
+                    foreach ($objectIds as $id) {
+                        if (count($artworks) >= $targetCount || $attempts >= $maxFetches) {
+                            break 2;
+                        }
+                        $attempts++;
+
+                        try {
+                            $artifactResponse = Http::retry(2, 200)
+                                ->timeout(8)
+                                ->get("https://collectionapi.metmuseum.org/public/collection/v1/objects/{$id}");
+
+                            if (!$artifactResponse->successful()) {
+                                continue;
+                            }
+
+                            $artifact = $artifactResponse->json();
+
+                            if (is_array($artifact) && 
+                                !empty($artifact['primaryImageSmall']) && 
+                                !empty($artifact['title']) &&
+                                !empty($artifact['objectDate'])) {
+                                $artworks[] = $artifact;
+                            }
+                        } catch (\Exception $e) {
+                            // Skip this artifact if there's an error
+                            continue;
+                        }
+                    }
+                } catch (\Exception $e) {
+                    // Skip this department if there's an error
+                    continue;
                 }
             }
 
             // If we don't have enough, try search
             if (count($artworks) < $targetCount) {
-                $searchResponse = Http::retry(2, 200)
-                    ->timeout(8)
-                    ->get('https://collectionapi.metmuseum.org/public/collection/v1/search', [
-                        'q' => $selectedMovement['search'],
-                        'hasImages' => true,
-                    ]);
-
-                $searchIds = array_slice($searchResponse->json('objectIDs') ?? [], 0, 50);
-                shuffle($searchIds);
-
-                foreach ($searchIds as $id) {
-                    if (count($artworks) >= $targetCount || $attempts >= $maxFetches) {
-                        break;
-                    }
-                    $attempts++;
-
-                    // Skip if already added
-                    if (collect($artworks)->contains('objectID', $id)) {
-                        continue;
-                    }
-
-                    $artifact = Http::retry(2, 200)
+                try {
+                    $searchResponse = Http::retry(2, 200)
                         ->timeout(8)
-                        ->get("https://collectionapi.metmuseum.org/public/collection/v1/objects/{$id}")
-                        ->json();
+                        ->get('https://collectionapi.metmuseum.org/public/collection/v1/search', [
+                            'q' => $selectedMovement['search'],
+                            'hasImages' => true,
+                        ]);
 
-                    if (!empty($artifact['primaryImageSmall']) && 
-                        !empty($artifact['title']) &&
-                        !empty($artifact['objectDate'])) {
-                        $artworks[] = $artifact;
+                    if ($searchResponse->successful()) {
+                        $searchIds = $searchResponse->json('objectIDs') ?? [];
+                        
+                        if (is_array($searchIds) && !empty($searchIds)) {
+                            $searchIds = array_slice($searchIds, 0, 50);
+                            shuffle($searchIds);
+
+                            foreach ($searchIds as $id) {
+                                if (count($artworks) >= $targetCount || $attempts >= $maxFetches) {
+                                    break;
+                                }
+                                $attempts++;
+
+                                // Skip if already added
+                                if (collect($artworks)->contains('objectID', $id)) {
+                                    continue;
+                                }
+
+                                try {
+                                    $artifactResponse = Http::retry(2, 200)
+                                        ->timeout(8)
+                                        ->get("https://collectionapi.metmuseum.org/public/collection/v1/objects/{$id}");
+
+                                    if (!$artifactResponse->successful()) {
+                                        continue;
+                                    }
+
+                                    $artifact = $artifactResponse->json();
+
+                                    if (is_array($artifact) && 
+                                        !empty($artifact['primaryImageSmall']) && 
+                                        !empty($artifact['title']) &&
+                                        !empty($artifact['objectDate'])) {
+                                        $artworks[] = $artifact;
+                                    }
+                                } catch (\Exception $e) {
+                                    // Skip this artifact if there's an error
+                                    continue;
+                                }
+                            }
+                        }
                     }
+                } catch (\Exception $e) {
+                    // If search fails, just return what we have
                 }
             }
 
             return array_slice($artworks, 0, $targetCount);
-        });
+            });
+        } catch (\Exception $e) {
+            // If cache fails, return empty array
+            $artworks = [];
+        }
+
+        // Ensure artworks is always an array
+        if (!is_array($artworks)) {
+            $artworks = [];
+        }
 
         return Inertia::render('ArtMovements/Index', [
             'artworks' => $artworks,

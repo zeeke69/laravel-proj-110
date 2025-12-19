@@ -14,6 +14,28 @@ export default function SplineBackground({ sceneUrl: sceneUrlProp, iframeUrl: if
     const iframeUrl = iframeUrlProp ?? import.meta.env.VITE_SPLINE_EMBED_URL;
 
     useEffect(() => {
+        // Suppress specific harmless WebGL errors from Spline viewer
+        const originalError = console.error;
+        const webGLErrorFilter = (...args) => {
+            const message = args.join(' ');
+            // Only suppress the specific mipmap generation error - it's harmless
+            if (
+                message.includes('GL_INVALID_OPERATION') &&
+                message.includes('glGenerateMipmap') &&
+                message.includes('zero-size texture')
+            ) {
+                return; // Suppress this specific harmless error
+            }
+            originalError.apply(console, args);
+        };
+        console.error = webGLErrorFilter;
+
+        return () => {
+            console.error = originalError;
+        };
+    }, []);
+
+    useEffect(() => {
         if (!sceneUrl) return;
         if (customElements.get('spline-viewer')) return;
 

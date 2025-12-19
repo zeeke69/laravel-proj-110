@@ -1,11 +1,88 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { Head, router, usePage } from '@inertiajs/react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 export default function ArtMovements() {
     const { artworks = [], movements = {}, selectedMovement, favorites = [], favoriteIds = [] } = usePage().props;
     
     const [isAdding, setIsAdding] = useState({});
+    const [editingId, setEditingId] = useState(null);
+    const [notesEdit, setNotesEdit] = useState('');
+
+    // Draggable "Favorites bubble" panel positioning (persisted in localStorage).
+    const [favPos, setFavPos] = useState(() => {
+        try {
+            const raw = localStorage.getItem('artMovements:favoritesPos');
+            if (!raw) return { x: 24, y: 120 };
+            const parsed = JSON.parse(raw);
+            if (typeof parsed?.x === 'number' && typeof parsed?.y === 'number') return parsed;
+        } catch {
+            // ignore
+        }
+        return { x: 24, y: 120 };
+    });
+    const [draggingFav, setDraggingFav] = useState(null); // { startX, startY, originX, originY }
+    const [favMinimized, setFavMinimized] = useState(() => {
+        try {
+            return localStorage.getItem('artMovements:favoritesMinimized') === '1';
+        } catch {
+            return false;
+        }
+    });
+
+    useEffect(() => {
+        try {
+            localStorage.setItem('artMovements:favoritesPos', JSON.stringify(favPos));
+        } catch {
+            // ignore
+        }
+    }, [favPos]);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem('artMovements:favoritesMinimized', favMinimized ? '1' : '0');
+        } catch {
+            // ignore
+        }
+    }, [favMinimized]);
+
+    useEffect(() => {
+        if (!draggingFav) return;
+
+        const onMove = (e) => {
+            const clientX = e.touches?.[0]?.clientX ?? e.clientX;
+            const clientY = e.touches?.[0]?.clientY ?? e.clientY;
+
+            const dx = clientX - draggingFav.startX;
+            const dy = clientY - draggingFav.startY;
+
+            const panelW = 420;
+            const panelH = 520;
+            const margin = 8;
+
+            const maxX = Math.max(margin, window.innerWidth - panelW - margin);
+            const maxY = Math.max(margin, window.innerHeight - panelH - margin);
+
+            const nextX = Math.min(maxX, Math.max(margin, draggingFav.originX + dx));
+            const nextY = Math.min(maxY, Math.max(margin, draggingFav.originY + dy));
+
+            setFavPos({ x: nextX, y: nextY });
+        };
+
+        const onUp = () => setDraggingFav(null);
+
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onUp);
+        window.addEventListener('touchmove', onMove, { passive: false });
+        window.addEventListener('touchend', onUp);
+
+        return () => {
+            window.removeEventListener('mousemove', onMove);
+            window.removeEventListener('mouseup', onUp);
+            window.removeEventListener('touchmove', onMove);
+            window.removeEventListener('touchend', onUp);
+        };
+    }, [draggingFav]);
 
     const handleAddToFavorites = (artwork) => {
         // Check if already in favorites
@@ -53,11 +130,171 @@ export default function ArtMovements() {
         });
     };
 
+    const handleDeleteFavorite = (id) => {
+        if (confirm('Delete this favorite?')) {
+            router.delete(`/favorites/${id}`, {
+                preserveScroll: true,
+                onSuccess: () => {
+                    router.reload({ only: ['favorites', 'favoriteIds'], preserveScroll: true });
+                },
+            });
+        }
+    };
+
+    const handleStartEdit = (favorite) => {
+        setEditingId(favorite.id);
+        setNotesEdit(favorite.notes || '');
+    };
+
+    const handleCancelEdit = () => {
+        setEditingId(null);
+        setNotesEdit('');
+    };
+
+    const handleSaveEdit = (favorite) => {
+        router.put(`/favorites/${favorite.id}`, { notes: notesEdit }, {
+            preserveScroll: true,
+            onSuccess: () => {
+                setEditingId(null);
+                setNotesEdit('');
+                router.reload({ only: ['favorites'], preserveScroll: true });
+            },
+        });
+    };
+
     return (
         <AuthenticatedLayout header={<h2 className="text-xl font-semibold text-gray-800">An Expedition Through Art Movements</h2>}>
             <Head title="Art Movements" />
             <div className="py-12">
                 <div className="mx-auto max-w-7xl sm:px-6 lg:px-8">
+                    {/* Draggable Favorites bubble/panel */}
+                    {favorites.length > 0 && (
+                        <div
+                            className="fixed z-30"
+                            style={{ left: `${favPos.x}px`, top: `${favPos.y}px` }}
+                        >
+                            <div className={`${favMinimized ? 'w-[220px] h-[52px]' : 'w-[420px] h-[520px]'} rounded-3xl border border-white/40 bg-white/80 backdrop-blur shadow-xl overflow-hidden`}>
+                                <div
+                                    className="pointer-events-auto flex items-center justify-between px-4 py-3 bg-white/70 border-b border-white/40 cursor-grab active:cursor-grabbing"
+                                    onMouseDown={(e) => {
+                                        setDraggingFav({
+                                            startX: e.clientX,
+                                            startY: e.clientY,
+                                            originX: favPos.x,
+                                            originY: favPos.y,
+                                        });
+                                    }}
+                                    onTouchStart={(e) => {
+                                        const t = e.touches[0];
+                                        setDraggingFav({
+                                            startX: t.clientX,
+                                            startY: t.clientY,
+                                            originX: favPos.x,
+                                            originY: favPos.y,
+                                        });
+                                    }}
+                                >
+                                    <div className="text-sm font-semibold text-gray-900">
+                                        Favorites{!favMinimized ? ` (${favorites.length})` : ''}
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            type="button"
+                                            className="pointer-events-auto rounded bg-white/70 px-2 py-1 text-xs hover:bg-white"
+                                            onClick={() => setFavMinimized((v) => !v)}
+                                            title={favMinimized ? 'Restore' : 'Minimize'}
+                                        >
+                                            {favMinimized ? '▢' : '—'}
+                                        </button>
+                                        <div className="text-xs text-gray-700">
+                                            Drag
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {!favMinimized && (
+                                    <div className="h-[calc(520px-52px)] overflow-auto p-3">
+                                        {favorites.length === 0 ? (
+                                            <div className="text-sm text-gray-600">No favorites yet.</div>
+                                        ) : (
+                                            <ul className="space-y-3">
+                                                {favorites.map(fav => (
+                                                    <li key={fav.id} className="flex justify-between items-center border bg-white rounded-xl shadow-sm p-2">
+                                                        <div className="flex items-center gap-3 flex-1">
+                                                            {fav.image_url ? (
+                                                                <img
+                                                                    src={fav.image_url}
+                                                                    alt={fav.item_name}
+                                                                    className="h-14 w-14 object-cover rounded-lg"
+                                                                />
+                                                            ) : (
+                                                                <div className="h-14 w-14 bg-gray-100 rounded-lg" />
+                                                            )}
+
+                                                            <div className="flex-1">
+                                                                <div className="font-semibold">{fav.item_name}</div>
+                                                                {(fav.culture || fav.object_date) && (
+                                                                    <div className="text-sm text-gray-600">
+                                                                        {[fav.culture, fav.object_date].filter(Boolean).join(' — ')}
+                                                                    </div>
+                                                                )}
+                                                                <div className="text-sm">
+                                                                    {editingId === fav.id ? (
+                                                                        <input
+                                                                            type="text"
+                                                                            value={notesEdit}
+                                                                            onChange={e => setNotesEdit(e.target.value)}
+                                                                            className="border p-1 rounded w-full"
+                                                                        />
+                                                                    ) : (
+                                                                        fav.notes
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex flex-col gap-2 pl-2">
+                                                            {editingId === fav.id ? (
+                                                                <>
+                                                                    <button 
+                                                                        onClick={() => handleSaveEdit(fav)} 
+                                                                        className="bg-green-500 text-white px-2 py-1 rounded text-xs"
+                                                                    >
+                                                                        Save
+                                                                    </button>
+                                                                    <button 
+                                                                        onClick={handleCancelEdit} 
+                                                                        className="bg-gray-500 text-white px-2 py-1 rounded text-xs"
+                                                                    >
+                                                                        Cancel
+                                                                    </button>
+                                                                </>
+                                                            ) : (
+                                                                <>
+                                                                    <button 
+                                                                        onClick={() => handleStartEdit(fav)} 
+                                                                        className="bg-yellow-500 text-white px-2 py-1 rounded text-xs"
+                                                                    >
+                                                                        Edit
+                                                                    </button>
+                                                                    <button 
+                                                                        onClick={() => handleDeleteFavorite(fav.id)} 
+                                                                        className="bg-red-500 text-white px-2 py-1 rounded text-xs"
+                                                                    >
+                                                                        Delete
+                                                                    </button>
+                                                                </>
+                                                            )}
+                                                        </div>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
                     <div className="overflow-hidden bg-transparent sm:rounded-lg">
                         <div className="p-6">
                             {/* Header */}
@@ -101,6 +338,8 @@ export default function ArtMovements() {
                                     </p>
                                 </div>
                             )}
+
+                            {/* Favorites moved to a draggable floating panel */}
 
                             {/* Artworks Grid */}
                             {artworks.length === 0 ? (
