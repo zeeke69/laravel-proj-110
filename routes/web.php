@@ -65,8 +65,10 @@ Route::middleware(['auth'])->group(function () {
     Route::put('/favorites/{favorite}', [FavoriteController::class, 'update'])->name('favorites.update'); // ✅ Fixed update route
     Route::delete('/favorites/{favorite}', [FavoriteController::class, 'destroy'])->name('favorites.destroy');
 
-    // Profile Edit route for Ziggy (required by AuthenticatedLayout)
+    // Profile routes
     Route::get('/profile/edit', [ProfileController::class, 'edit'])->name('profile.edit');
+    Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
+    Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
 
     // Logout route for Ziggy
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
